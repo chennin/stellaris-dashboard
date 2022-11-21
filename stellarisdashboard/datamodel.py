@@ -734,6 +734,11 @@ class Country(Base):
                 countries_by_relation[key].append(relation.target)
         return countries_by_relation
 
+    def get_country_color_primary(self):
+        return self.country_color_primary
+
+    def get_country_color_secondary(self):
+        return self.country_color_secondary
 
 class Tradition(Base):
     __tablename__ = "traditionstable"
