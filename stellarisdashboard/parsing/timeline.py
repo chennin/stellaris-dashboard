@@ -410,11 +410,25 @@ class CountryProcessor(AbstractGamestateDataProcessor):
         return self.countries_by_ingame_id
 
     def extract_data_from_gamestate(self, dependencies):
+        country_color_primary = "null"
+        country_color_secondary = "null"
         for country_id, country_data_dict in self._gamestate_dict["country"].items():
             if not isinstance(country_data_dict, dict):
                 continue
             country_type = country_data_dict.get("type")
             country_name = dump_name(country_data_dict.get("name", "no name"))
+            country_colors = country_data_dict.get("flag", {}).get("colors", ["null" * 4])
+            # Paranoia: What if the colors array in the game save is only 1
+            # entry long? (If it's not there at all, we'll get "null"*4)
+            if len(country_colors) >= 2:
+              country_color_secondary = country_colors[1]
+            else:
+              country_color_secondary = "null"
+            if len(country_colors) >= 1:
+              country_color_primary = country_colors[0]
+            else:
+              country_color_primary = "null"
+            logger.debug(f"{self._basic_info.logger_str} Country ID {country_id} flag colors are {country_color_primary} and {country_color_secondary}")
             country_model = (
                 self._session.query(datamodel.Country)
                 .filter_by(game=self._db_game, country_id_in_game=country_id)
@@ -428,6 +442,8 @@ class CountryProcessor(AbstractGamestateDataProcessor):
                     game=self._db_game,
                     country_type=country_type,
                     country_name=country_name,
+                    country_color_primary=country_color_primary,
+                    country_color_secondary=country_color_secondary,
                 )
                 if country_id == self._basic_info.player_country_id:
                     country_model.first_player_contact_date = 0

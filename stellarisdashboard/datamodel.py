@@ -612,6 +612,8 @@ class Country(Base):
     is_other_player = Column(Boolean)
     country_name = Column(String(80))
     country_id_in_game = Column(Integer)
+    country_color_primary = Column(String(50))
+    country_color_secondary = Column(String(50))
     first_player_contact_date = Column(Integer)
     country_type = Column(String(50))
 
