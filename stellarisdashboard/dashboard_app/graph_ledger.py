@@ -655,23 +655,7 @@ def get_galaxy(game_id: str, slider_date: float) -> dcc.Graph:
 def get_country_color(country_name: str, alpha: float = 1.0, game_id: str = None) -> str:
     alpha = min(alpha, 1)
     alpha = max(alpha, 0)
-    r, g, b = None, None, None
-    if game_id:
-        with datamodel.get_db_session(game_id) as session:
-            for c in session.query(datamodel.Country):
-                if country_name == c.rendered_name:
-                    color = None
-                    if c.country_color_secondary in game_info.COLORS and c.country_color_secondary not in ["white", "black"]:
-                        color = c.country_color_secondary
-                    elif c.country_color_primary in game_info.COLORS and c.country_color_primary not in ["white", "black"]:
-                        color = c.country_color_primary
-                    if color:
-                        logger.info(f"Color for {country_name} is {color}")
-                        r = game_info.COLORS[color]["r"]
-                        g = game_info.COLORS[color]["g"]
-                        b = game_info.COLORS[color]["b"]
-    if not r or not g or not b:
-       r, g, b = visualization_data.get_color_vals(country_name)
+    r, g, b = visualization_data.get_color_vals(country_name, game_id = game_id)
     color = f"rgba({r},{g},{b},{alpha})"
     return color
 

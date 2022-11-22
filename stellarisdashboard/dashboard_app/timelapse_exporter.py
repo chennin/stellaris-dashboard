@@ -2,7 +2,7 @@ import datetime
 import io
 import logging
 from collections import defaultdict
-from typing import Tuple, Optional
+from typing import Tuple, Optional, Dict
 
 import matplotlib
 import matplotlib.pyplot as plt
@@ -61,8 +61,16 @@ class TimelapseExporter:
 
         export_days = self._day_list(start_date, end_date, step_days)
         frames = []
+        colors = {GalaxyMapData.UNCLAIMED: (0, 0, 0)}
         for i, day in enumerate(tqdm.tqdm(export_days)):
-            frame = self.draw_frame(day, x_range, y_range)
+            galaxy = self.galaxy_map_data.get_graph_for_date(day)
+            for node in galaxy.nodes:
+                if galaxy.nodes[node]["country"] not in colors:
+                    colors[ galaxy.nodes[node]["country"] ] = self.rgb(galaxy.nodes[node]["country"])
+            for e in galaxy.edges:
+                if galaxy.edges[e]["country"] not in colors:
+                    colors[ galaxy.edges[e]["country"] ] = self.rgb(galaxy.edges[e]["country"])
+            frame = self.draw_frame(day, x_range, y_range, colors, galaxy)
             if export_gif:
                 frames.append(frame)
             if export_frames:
@@ -102,7 +110,8 @@ class TimelapseExporter:
         return f"{self.game_id}-{ts}"
 
     def rgb(self, name: str):
-        r, g, b = get_color_vals(name)
+        r, g, b = get_color_vals(name, game_id = self.game_id)
+        logger.debug(f"RGB color for {name} is {r} {g} {b}")
         return r / 255.0, g / 255.0, b / 255.0
 
     def draw_frame(
@@ -110,24 +119,23 @@ class TimelapseExporter:
         day: int,
         x_range: Optional[Tuple[float, float]],
         y_range: Optional[Tuple[float, float]],
+        colors: Dict,
+        galaxy: nx.Graph,
     ) -> Image:
-        galaxy = self.galaxy_map_data.get_graph_for_date(day)
-
         fig = plt.figure(figsize=(self.width, self.height))
         ax = fig.add_subplot(111)
         if x_range:
             ax.set_xlim(*x_range)
         if y_range:
             ax.set_ylim(*y_range)
-
         nx.draw(
             galaxy,
             ax=ax,
             pos={node: galaxy.nodes[node]["pos"] for node in galaxy.nodes},
             node_color=[
-                self.rgb(galaxy.nodes[node]["country"]) for node in galaxy.nodes
+                colors[ galaxy.nodes[node]["country"] ] for node in galaxy.nodes
             ],
-            edge_color=[self.rgb(galaxy.edges[e]["country"]) for e in galaxy.edges],
+            edge_color=[ colors[ galaxy.edges[e]["country"] ] for e in galaxy.edges],
             with_labels=False,
             font_weight="bold",
             node_size=10,
@@ -135,7 +143,7 @@ class TimelapseExporter:
         )
         fig.set_facecolor("k")
 
-        self._draw_systems(ax, galaxy)
+        self._draw_systems(ax, colors, galaxy)
 
         ax.text(
             0.05,
@@ -152,13 +160,13 @@ class TimelapseExporter:
         buf.seek(0)
         return Image.open(buf)
 
-    def _draw_systems(self, ax, galaxy):
+    def _draw_systems(self, ax, colors, galaxy):
         systems_by_country = defaultdict(lambda: defaultdict(int))
         polygon_patches = []
         for node in galaxy:
             country = galaxy.nodes[node]["country"]
             nodecolor = (
-                self.rgb(country) if country != GalaxyMapData.UNCLAIMED else (0, 0, 0)
+                colors[country]
             )
 
             if country != GalaxyMapData.UNCLAIMED:

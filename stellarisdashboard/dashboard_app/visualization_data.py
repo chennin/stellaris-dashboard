@@ -92,7 +92,7 @@ def get_current_execution_plot_data(
 
 
 def get_color_vals(
-    key_str: str, range_min: float = 0.1, range_max: float = 1.0
+    key_str: str, range_min: float = 0.1, range_max: float = 1.0, game_id: str = None
 ) -> Tuple[float, float, float]:
     """Generate RGB values for the given identifier. Some special values (tech categories)
     have hardcoded colors to roughly match the game's look and feel.
@@ -100,6 +100,7 @@ def get_color_vals(
     For unknown identifiers, a random color is generated, with the key_str being applied as a seed to
     the random number generator. This makes colors consistent across figures and executions.
     """
+    r, g, b = None, None, None
     if key_str.lower() == "physics":
         r, g, b = COLOR_PHYSICS
     elif key_str.lower() == "society":
@@ -112,7 +113,21 @@ def get_color_vals(
         r, g, b = 255, 0, 0
     elif key_str.endswith("internal_market"):
         r, g, b = 0, 0, 255
-    else:
+    elif game_id:
+        with datamodel.get_db_session(game_id) as session:
+            for c in session.query(datamodel.Country):
+                if key_str == c.rendered_name:
+                    color = None
+                    if c.country_color_secondary in game_info.COLORS and c.country_color_secondary not in ["white", "black"]:
+                        color = c.country_color_secondary
+                    elif c.country_color_primary in game_info.COLORS and c.country_color_primary not in ["white", "black"]:
+                        color = c.country_color_primary
+                    if color:
+                        logger.debug(f"Color name for {key_str} is {color}")
+                        r = game_info.COLORS[color]["r"]
+                        g = game_info.COLORS[color]["g"]
+                        b = game_info.COLORS[color]["b"]
+    if not r or not g or not b:
         random.seed(key_str)
         h = random.uniform(0, 1)
         l = random.uniform(0.4, 0.6)
