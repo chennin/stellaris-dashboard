@@ -612,8 +612,8 @@ class Country(Base):
     is_other_player = Column(Boolean)
     country_name = Column(String(80))
     country_id_in_game = Column(Integer)
-    country_color_primary = Column(String(50))
-    country_color_secondary = Column(String(50))
+    country_color_primary = Column(String(50), default="null")
+    country_color_secondary = Column(String(50), default="null")
     first_player_contact_date = Column(Integer)
     country_type = Column(String(50))
 
@@ -733,12 +733,6 @@ class Country(Base):
                     countries_by_relation[key] = []
                 countries_by_relation[key].append(relation.target)
         return countries_by_relation
-
-    def get_country_color_primary(self):
-        return self.country_color_primary
-
-    def get_country_color_secondary(self):
-        return self.country_color_secondary
 
 class Tradition(Base):
     __tablename__ = "traditionstable"

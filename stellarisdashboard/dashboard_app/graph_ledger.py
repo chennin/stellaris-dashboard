@@ -8,7 +8,7 @@ import plotly.graph_objs as go
 from dash import Dash, callback_context, dcc, html, Input, Output
 from flask import render_template
 
-from stellarisdashboard import config, datamodel
+from stellarisdashboard import config, datamodel, game_info
 from stellarisdashboard.dashboard_app import (
     utils,
     flask_app,
@@ -434,16 +434,19 @@ def _get_raw_data_for_line_plot(
     plot_spec: visualization_data.PlotSpecification,
 ) -> List[Dict[str, Any]]:
     plot_list = []
+    colors = {}
     for key, x_values, y_values in plot_data.get_data_for_plot(plot_spec):
         if all(y != y for y in y_values):
             continue
         if not x_values:
             continue
+        if key not in colors:
+          colors[key] = get_country_color(key, alpha=1.0)
         line = dict(
             x=x_values,
             y=y_values,
             name=dict_key_to_legend_label(key),
-            line={"color": get_country_color(key, 1.0)},
+            line={"color": colors[key]},
             text=get_plot_value_labels(x_values, y_values, key),
             hoverinfo="text",
         )
@@ -461,6 +464,7 @@ def _get_raw_data_for_stacked_and_budget_plots(
         config.CONFIG.normalize_stacked_plots
         and plot_spec.style == visualization_data.PlotStyle.stacked
     )
+    colors = {}
     for key, x_values, y_values in plot_data.get_data_for_plot(plot_spec):
         if not any(y_values):
             continue
@@ -472,6 +476,9 @@ def _get_raw_data_for_stacked_and_budget_plots(
         stackgroup = "pos"
         if min(y_values) < 0:
             stackgroup = "neg"
+        if key not in colors:
+          colors[key] = get_country_color(key, alpha=1.0)
+          colors[f"{key}fill"] = get_country_color(key, alpha=0.5)
         lines.append(
             dict(
                 x=x_values,
@@ -479,10 +486,10 @@ def _get_raw_data_for_stacked_and_budget_plots(
                 name=dict_key_to_legend_label(key),
                 hoverinfo="text",
                 mode="lines",
-                line=dict(width=0.5, color=get_country_color(key, 1.0)),
+                line=dict(width=0.5, color=colors[key]),
                 stackgroup=stackgroup,
                 groupnorm="percent" if normalized else "",
-                fillcolor=get_country_color(key, 0.5),
+                fillcolor=colors[f"{key}fill"],
                 text=get_plot_value_labels(x_values, y_values, key),
             )
         )
@@ -529,14 +536,18 @@ def get_galaxy(game_id: str, slider_date: float) -> dcc.Graph:
     galaxy = visualization_data.get_galaxy_data(game_id)
     graph = galaxy.get_graph_for_date(int(slider_date))
     edge_traces_data = {}
+
+    colors = {}
     for edge in graph.edges:
         country = graph.edges[edge]["country"]
+        if country not in colors:
+          colors[country] = get_country_color(country, game_id = game_id)
         if country not in edge_traces_data:
             edge_traces_data[country] = dict(
                 x=[],
                 y=[],
                 text=[],
-                line=go.scatter.Line(width=0.5, color=get_country_color(country)),
+                line=go.scatter.Line(width=0.5, color=colors[country]),
                 hoverinfo="text",
                 mode="lines",
                 showlegend=False,
@@ -555,6 +566,8 @@ def get_galaxy(game_id: str, slider_date: float) -> dcc.Graph:
     country_system_markers = {}
     for i, node in enumerate(graph.nodes):
         country = graph.nodes[node]["country"]
+        if country not in colors:
+          colors[country] = get_country_color(country, game_id = game_id)
         if country not in country_system_markers:
             country_system_markers[country] = dict(
                 x=[],
@@ -566,8 +579,7 @@ def get_galaxy(game_id: str, slider_date: float) -> dcc.Graph:
                 marker=dict(color=[], size=4),
                 name=country,
             )
-        color = get_country_color(country)
-        country_system_markers[country]["marker"]["color"].append(color)
+        country_system_markers[country]["marker"]["color"].append(colors[country])
         x, y = graph.nodes[node]["pos"]
         country_system_markers[country]["x"].append(x)
         country_system_markers[country]["y"].append(y)
@@ -584,7 +596,7 @@ def get_galaxy(game_id: str, slider_date: float) -> dcc.Graph:
                     text=[text],
                     customdata=[customdata],
                     fill="toself",
-                    fillcolor=color,
+                    fillcolor=colors[country],
                     hoverinfo="none",
                     line=dict(width=0),
                     mode="none",
@@ -640,10 +652,26 @@ def get_galaxy(game_id: str, slider_date: float) -> dcc.Graph:
     )
 
 
-def get_country_color(country_name: str, alpha: float = 1.0) -> str:
+def get_country_color(country_name: str, alpha: float = 1.0, game_id: str = None) -> str:
     alpha = min(alpha, 1)
     alpha = max(alpha, 0)
-    r, g, b = visualization_data.get_color_vals(country_name)
+    r, g, b = None, None, None
+    if game_id:
+        with datamodel.get_db_session(game_id) as session:
+            for c in session.query(datamodel.Country):
+                if country_name == c.rendered_name:
+                    color = None
+                    if c.country_color_secondary in game_info.COLORS and c.country_color_secondary not in ["white", "black"]:
+                        color = c.country_color_secondary
+                    elif c.country_color_primary in game_info.COLORS and c.country_color_primary not in ["white", "black"]:
+                        color = c.country_color_primary
+                    if color:
+                        logger.info(f"Color for {country_name} is {color}")
+                        r = game_info.COLORS[color]["r"]
+                        g = game_info.COLORS[color]["g"]
+                        b = game_info.COLORS[color]["b"]
+    if not r or not g or not b:
+       r, g, b = visualization_data.get_color_vals(country_name)
     color = f"rgba({r},{g},{b},{alpha})"
     return color
 
