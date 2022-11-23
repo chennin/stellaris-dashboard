@@ -6,6 +6,7 @@ from typing import Tuple, Optional, Dict
 
 import matplotlib
 import matplotlib.pyplot as plt
+import matplotlib.patheffects as path_effects
 import networkx as nx
 import numpy as np
 import tqdm
@@ -165,9 +166,7 @@ class TimelapseExporter:
         polygon_patches = []
         for node in galaxy:
             country = galaxy.nodes[node]["country"]
-            nodecolor = (
-                colors[country]
-            )
+            nodecolor = ( colors[country] if country != GalaxyMapData.UNCLAIMED else (0, 0, 0) )
 
             if country != GalaxyMapData.UNCLAIMED:
                 systems_by_country[country]["x"] += galaxy.nodes[node]["pos"][0]
@@ -197,6 +196,7 @@ class TimelapseExporter:
                 position,
                 country,
                 color=avg_pos["color"],
-                size="x-small",
+                size="medium",
                 ha="center",
+                path_effects=[path_effects.withStroke(linewidth=3, foreground="w")]
             )
