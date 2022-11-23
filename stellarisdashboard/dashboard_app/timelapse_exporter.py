@@ -62,7 +62,7 @@ class TimelapseExporter:
 
         export_days = self._day_list(start_date, end_date, step_days)
         frames = []
-        colors = {GalaxyMapData.UNCLAIMED: (0, 0, 0)}
+        colors = {GalaxyMapData.UNCLAIMED: (1, 1, 1)}
         for i, day in enumerate(tqdm.tqdm(export_days)):
             galaxy = self.galaxy_map_data.get_graph_for_date(day)
             for node in galaxy.nodes:
