@@ -225,10 +225,10 @@ class TimelapseExporter:
                     x,
                     position,
                     country,
-                    color=avg_pos["color"],
+                    color="black",
                     size="medium",
                     ha="center",
-                    path_effects=[path_effects.withStroke(linewidth=3, foreground="w")]
+                    path_effects=[path_effects.withStroke(linewidth=2, foreground="white")]
                 )
 
         for x_values, y_values in self.galaxy_map_data.get_country_border_ridges(
