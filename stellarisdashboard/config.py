@@ -1,7 +1,6 @@
 import dataclasses
 import itertools
 import logging
-import multiprocessing
 import multiprocessing as mp  # only to get the cpu count
 import pathlib
 import platform
@@ -9,12 +8,15 @@ import sys
 import traceback
 from collections import defaultdict
 from typing import List, Dict, Any
+
 import yaml
 
-LOG_LEVELS = {"INFO": logging.INFO, "DEBUG": logging.DEBUG}
+LOG_LEVELS = {"CRITICAL": logging.CRITICAL, "ERROR": logging.ERROR, "WARNING": logging.WARNING, "INFO": logging.INFO, "DEBUG": logging.DEBUG}
 CPU_COUNT = mp.cpu_count()
 
-LOG_FORMAT = logging.Formatter("%(processName)s - %(asctime)s - %(name)s - %(levelname)s - %(message)s")
+LOG_FORMAT = logging.Formatter(
+    "%(processName)s - %(asctime)s - %(name)s - %(levelname)s - %(message)s"
+)
 
 CONFIG: "Config" = None
 logger: logging.Logger = None
@@ -136,7 +138,11 @@ DEFAULT_TAB_LAYOUT = {
         "research_output_by_category_graph",
     ],
     "Military": ["fleet_size_graph", "military_power_graph", "fleet_composition_graph"],
-    "Victory": ["victory_rank_graph", "victory_score_graph", "victory_economy_score_graph",],
+    "Victory": [
+        "victory_rank_graph",
+        "victory_score_graph",
+        "victory_economy_score_graph",
+    ],
     MARKET_TAB: [],  # filled dynamically based on resource config
 }
 DEFAULT_MARKET_RESOURCES = [
@@ -178,6 +184,7 @@ DEFAULT_SETTINGS = dict(
     polling_interval=0.5,
     check_version=True,
     log_level="INFO",
+    include_id_in_names=True,  # TODO handle duplicate keys in legend entries in a better way
     show_everything=False,
     filter_events_by_type=True,
     show_all_country_types=False,
@@ -191,6 +198,7 @@ DEFAULT_SETTINGS = dict(
     tab_layout=DEFAULT_TAB_LAYOUT,
     market_resources=DEFAULT_MARKET_RESOURCES,
     market_fee=DEFAULT_MARKET_FEE,
+    production=False,
 )
 
 
@@ -217,6 +225,7 @@ class Config:
     show_everything: bool = None
     read_all_countries: bool = None
     show_all_country_types: bool = None
+    include_id_in_names: bool = None
 
     save_name_filter: str = None
     skip_saves: int = None
@@ -228,6 +237,8 @@ class Config:
     tab_layout: Dict[str, List[str]] = None
     market_resources: List[Dict[str, Any]] = None
     market_fee: List[Dict[str, float]] = None
+
+    production: bool = False
 
     PATH_KEYS = {
         "base_output_path",
@@ -241,6 +252,8 @@ class Config:
         "read_all_countries",
         "show_all_country_types",
         "log_to_file",
+        "include_id_in_names",
+        "production",
     }
     INT_KEYS = {
         "port",
@@ -263,7 +276,9 @@ class Config:
         "tab_layout",
     }
     LIST_KEYS = {"market_resources", "market_fee"}
-    ALL_KEYS = PATH_KEYS | BOOL_KEYS | INT_KEYS | FLOAT_KEYS | STR_KEYS | DICT_KEYS | LIST_KEYS
+    ALL_KEYS = (
+        PATH_KEYS | BOOL_KEYS | INT_KEYS | FLOAT_KEYS | STR_KEYS | DICT_KEYS | LIST_KEYS
+    )
 
     def apply_dict(self, settings_dict):
         logger.info("Updating settings")
@@ -303,7 +318,9 @@ class Config:
                     )
                     return
             except Exception:
-                logger.warning(f"Error during path creation while updating {key} with value {val}:")
+                logger.warning(
+                    f"Error during path creation while updating {key} with value {val}:"
+                )
                 logger.error(traceback.format_exc())
                 logger.info(f"Ignoring setting {key} with value {val}.")
                 return
@@ -321,7 +338,9 @@ class Config:
                 logger.warning(f"Ignoring tab {tab}, it is reserved for the galaxy map")
                 continue
             if tab == MARKET_TAB:
-                logger.warning(f"Ignoring values for tab {tab}, it is filled dynamically")
+                logger.warning(
+                    f"Ignoring values for tab {tab}, it is filled dynamically"
+                )
                 processed[tab] = []
                 continue
             if not isinstance(plot_list, list):
@@ -373,7 +392,9 @@ class Config:
             return True
         elif val == "false":
             return False
-        raise ValueError(f"Expected either true or false for bool value, received {val}.")
+        raise ValueError(
+            f"Expected either true or false for bool value, received {val}."
+        )
 
     @property
     def db_path(self) -> pathlib.Path:
@@ -386,10 +407,13 @@ class Config:
     def localization_files(self):
         files = list(
             itertools.chain(
-                self.localization_file_dir.glob("**/*.yaml"), self.localization_file_dir.glob("**/*.yml"),
+                self.localization_file_dir.glob("**/*.yaml"),
+                self.localization_file_dir.glob("**/*.yml"),
             )
         )
-        logger.info(f"Loaded {len(files)} localization files from {self.localization_file_dir}")
+        logger.info(
+            f"Loaded {len(files)} localization files from {self.localization_file_dir}"
+        )
         return files
 
 
@@ -414,7 +438,7 @@ def initialize():
         return
     global logger
     initialize_logger()
-    logger = logging.getLogger(__name__)
+    logger = logging.getLogger()
     CONFIG = Config()
     _apply_existing_settings(CONFIG)
 
@@ -430,10 +454,11 @@ def initialize():
 def configure_logger():
     global logger
     logger.setLevel(LOG_LEVELS.get(CONFIG.log_level, logging.INFO))
+    for h in logger.handlers:
+        h.setLevel(LOG_LEVELS.get(CONFIG.log_level, logging.INFO))
     if CONFIG.log_to_file:
-        logger = logging.getLogger()
         file_ch = logging.FileHandler(CONFIG.base_output_path / "log.txt")
-        file_ch.setLevel(logging.WARN)
+        file_ch.setLevel(LOG_LEVELS.get(CONFIG.log_level, logging.WARN))
         file_ch.setFormatter(LOG_FORMAT)
         logger.addHandler(file_ch)
 

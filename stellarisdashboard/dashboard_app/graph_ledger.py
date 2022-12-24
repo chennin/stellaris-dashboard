@@ -1,5 +1,6 @@
 import logging
 import time
+from collections import defaultdict
 from typing import Dict, Any, List
 from urllib import parse
 
@@ -7,6 +8,7 @@ import dash.exceptions
 import plotly.graph_objs as go
 from dash import Dash, callback_context, dcc, html, Input, Output
 from flask import render_template
+from PIL import features
 
 from stellarisdashboard import config, datamodel, game_info
 from stellarisdashboard.dashboard_app import (
@@ -85,6 +87,7 @@ SELECT_SYSTEM_DEFAULT = html.P(
 TIMELAPSE_DEFAULT_START = "2200.01.01"
 TIMELAPSE_DEFAULT_STEP = 120
 TIMELAPSE_DEFAULT_FRAME_TIME = 100
+TIMELAPSE_DEFAULT_DPI = 100
 
 timeline_app = Dash(
     __name__,
@@ -190,9 +193,9 @@ def galaxy_map_system_info(clickData):
 def show_hide_galaxy_tab_ui(tab_value):
     style_dict = {
         "display": "none",
-        "width": f"{int(0.90 * config.CONFIG.plot_width)}px",
+        "width": f"{config.CONFIG.plot_width}px",
         "margin": "auto",
-        # "text-align": "center",
+        "text-align": "center",
         "padding-left": "1%",
         "padding-right": "1%",
         "background-color": BACKGROUND_DARK,
@@ -243,6 +246,7 @@ def adjust_end_date_field_value(tab_value, search):
         Input("timelapse-end-input", "value"),
         Input("timelapse-step-input", "value"),
         Input("timelapse-duration-input", "value"),
+        Input("timelapse-dpi-input", "value"),
         Input("galaxy-export-button", "n_clicks"),
         Input("timelapse-export-mode", "value"),
     ],
@@ -253,6 +257,7 @@ def trigger_timeline_export(
     end_date,
     step_days,
     frame_time_ms,
+    dpi,
     clicks,
     export_mode,
 ):
@@ -270,14 +275,18 @@ def trigger_timeline_export(
     frame_time_ms = frame_time_ms or TIMELAPSE_DEFAULT_FRAME_TIME
 
     export_gif = "export_gif" in export_mode
+    export_webp = "export_webp" in export_mode
     export_frames = "export_frames" in export_mode
+    square_aspect_ratio = "square_aspect_ratio" in export_mode
 
     changed_ids = [p["prop_id"].split(".")[0] for p in callback_context.triggered]
     button_pressed = "galaxy-export-button" in changed_ids
     if button_pressed:
         logger.info(f"Triggering timelapse export for {game_id}")
         logger.info(
-            f"{start_date=}, {end_date=}, {step_days=}, {frame_time_ms=}, {export_gif=}, {export_frames=}"
+            f"{start_date=}, {end_date=}, {step_days=}, {frame_time_ms=}, "
+            f"{export_gif=}, {export_webp=}, {export_frames=}, "
+            f"{square_aspect_ratio=}, {dpi=}"
         )
         try:
             tl_start_days = datamodel.date_to_days(start_date)
@@ -294,13 +303,16 @@ def trigger_timeline_export(
             )
             return
 
-        te = timelapse_exporter.TimelapseExporter(game_id)
+        width, height = (16, 16) if square_aspect_ratio else (16, 9)
+
+        te = timelapse_exporter.TimelapseExporter(game_id, width, height, dpi)
         te.create_timelapse(
             start_date=tl_start_days,
             end_date=tl_end_days,
             step_days=step_days,
             tl_duration=frame_time_ms,
             export_gif=export_gif,
+            export_webp=export_webp,
             export_frames=export_frames,
         )
 
@@ -372,7 +384,11 @@ def update_content(
                             style=dict(textAlign="center"),
                         )
                     ],
-                    style=dict(margin="auto", width=f"{config.CONFIG.plot_width}px"),
+                    style=dict(
+                        margin="auto",
+                        width=f"{config.CONFIG.plot_width}px",
+                        height=f"{config.CONFIG.plot_height}px",
+                    ),
                 )
             )
     else:
@@ -384,7 +400,7 @@ def update_content(
                 style=dict(
                     margin="auto",
                     width=f"{config.CONFIG.plot_width}px",
-                    # height=f"{config.CONFIG.plot_height}px",
+                    height=f"{config.CONFIG.plot_height}px",
                     backgroundColor=BACKGROUND_DARK,
                 ),
             )
@@ -533,13 +549,14 @@ def get_galaxy(game_id: str, slider_date: float) -> dcc.Graph:
     :return:
     """
     # adapted from https://plot.ly/python/network-graphs/
-    galaxy = visualization_data.get_galaxy_data(game_id)
-    graph = galaxy.get_graph_for_date(int(slider_date))
-    edge_traces_data = {}
+    galaxy_map_data = visualization_data.get_galaxy_data(game_id)
+    galaxy_map_data.update_graph_for_date(int(slider_date))
+    nx_graph = galaxy_map_data.galaxy_graph
 
+    edge_traces_data = {}
     colors = {}
-    for edge in graph.edges:
-        country = graph.edges[edge]["country"]
+    for edge in nx_graph.edges:
+        country = nx_graph.edges[edge]["country"]
         if country not in colors:
           colors[country] = get_country_color(country, game_id = game_id)
         if country not in edge_traces_data:
@@ -552,8 +569,8 @@ def get_galaxy(game_id: str, slider_date: float) -> dcc.Graph:
                 mode="lines",
                 showlegend=False,
             )
-        x0, y0 = graph.nodes[edge[0]]["pos"]
-        x1, y1 = graph.nodes[edge[1]]["pos"]
+        x0, y0 = nx_graph.nodes[edge[0]]["pos"]
+        x1, y1 = nx_graph.nodes[edge[1]]["pos"]
         # insert None to prevent dash from joining the lines
         edge_traces_data[country]["x"] += [x0, x1, None]
         edge_traces_data[country]["y"] += [y0, y1, None]
@@ -564,8 +581,15 @@ def get_galaxy(game_id: str, slider_date: float) -> dcc.Graph:
 
     system_shapes = []
     country_system_markers = {}
-    for i, node in enumerate(graph.nodes):
-        country = graph.nodes[node]["country"]
+    country_border_ridges = defaultdict(set)
+
+    country_border_ridges[
+        galaxy_map_data.UNCLAIMED
+    ] |= galaxy_map_data.galaxy_graph.graph["system_borders"].get(
+        galaxy_map_data.ARTIFICIAL_NODE, set()
+    )
+    for i, node in enumerate(nx_graph.nodes):
+        country = nx_graph.nodes[node]["country"]
         if country not in colors:
           colors[country] = get_country_color(country, game_id = game_id)
         if country not in country_system_markers:
@@ -579,16 +603,20 @@ def get_galaxy(game_id: str, slider_date: float) -> dcc.Graph:
                 marker=dict(color=[], size=4),
                 name=country,
             )
+        color = get_country_color(country)
         country_system_markers[country]["marker"]["color"].append(colors[country])
-        x, y = graph.nodes[node]["pos"]
+        x, y = nx_graph.nodes[node]["pos"]
         country_system_markers[country]["x"].append(x)
         country_system_markers[country]["y"].append(y)
-        text = f'{graph.nodes[node]["name"]} ({country})'
+        text = f'{nx_graph.nodes[node]["name"]} ({country})'
         country_system_markers[country]["text"].append(text)
-        customdata = {"system_id": graph.nodes[node]["system_id"], "game_id": game_id}
+        customdata = {
+            "system_id": nx_graph.nodes[node]["system_id"],
+            "game_id": game_id,
+        }
         country_system_markers[country]["customdata"].append(customdata)
         if country != visualization_data.GalaxyMapData.UNCLAIMED:
-            shape_x, shape_y = graph.nodes[node].get("shape", ([], []))
+            shape_x, shape_y = nx_graph.nodes[node].get("shape", ([], []))
             system_shapes.append(
                 go.Scatter(
                     x=shape_x,
@@ -604,6 +632,27 @@ def get_galaxy(game_id: str, slider_date: float) -> dcc.Graph:
                     showlegend=False,
                 )
             )
+        country_border_ridges[country] |= galaxy_map_data.galaxy_graph.graph[
+            "system_borders"
+        ].get(node, set())
+
+    country_borders = []
+    for x_values, y_values in galaxy_map_data.get_country_border_ridges(
+        country_border_ridges
+    ):
+        country_borders.append(
+            go.Scatter(
+                dict(
+                    x=x_values,
+                    y=y_values,
+                    text=[],
+                    line=go.scatter.Line(width=0.75, color="rgba(255,255,255,1)"),
+                    hoverinfo="text",
+                    mode="lines",
+                    showlegend=False,
+                )
+            )
+        )
 
     for country in country_system_markers:
         country_system_markers[country]["marker"] = go.scatter.Marker(
@@ -642,7 +691,10 @@ def get_galaxy(game_id: str, slider_date: float) -> dcc.Graph:
         title=f"Galaxy Map at {datamodel.days_to_date(slider_date)}",
     )
 
-    fig = go.Figure(data=system_shapes + system_markers + edge_traces, layout=layout)
+    fig = go.Figure(
+        data=system_shapes + system_markers + edge_traces + country_borders,
+        layout=layout,
+    )
     return dcc.Graph(
         id="galaxy-map",
         figure=fig,
@@ -660,11 +712,15 @@ def get_country_color(country_name: str, alpha: float = 1.0, game_id: str = None
     return color
 
 
-def start_dash_app(host,port):
+def start_dash_app(host, port):
     timeline_app.css.config.serve_locally = True
     timeline_app.scripts.config.serve_locally = True
     timeline_app.layout = get_layout()
-    timeline_app.run_server(host=host,port=port)
+    if config.CONFIG.production == True:
+        from waitress import serve
+        serve(timeline_app.server, host=host, port=port)
+    else:
+        timeline_app.run_server(host=host, port=port)
 
 
 def get_layout():
@@ -750,7 +806,7 @@ def get_layout():
                         placeholder=TIMELAPSE_DEFAULT_START,
                     ),
                 ],
-                style={"display": "inline-block", "width": "20%"},
+                style={"display": "inline-block"},
             ),
             html.Div(
                 [
@@ -761,7 +817,7 @@ def get_layout():
                         placeholder="2210.01.01",
                     ),
                 ],
-                style={"display": "inline-block", "width": "20%"},
+                style={"display": "inline-block"},
             ),
             html.Div(
                 [
@@ -772,7 +828,7 @@ def get_layout():
                         placeholder=TIMELAPSE_DEFAULT_STEP,
                     ),
                 ],
-                style={"display": "inline-block", "width": "20%"},
+                style={"display": "inline-block"},
             ),
             html.Div(
                 [
@@ -783,7 +839,18 @@ def get_layout():
                         placeholder=TIMELAPSE_DEFAULT_FRAME_TIME,
                     ),
                 ],
-                style={"display": "inline-block", "width": "20%"},
+                style={"display": "inline-block"},
+            ),
+            html.Div(
+                [
+                    html.P(f"DPI"),
+                    dcc.Input(
+                        id="timelapse-dpi-input",
+                        type="number",
+                        placeholder=TIMELAPSE_DEFAULT_DPI,
+                    ),
+                ],
+                style={"display": "inline-block"},
             ),
             html.Div(
                 [
@@ -799,6 +866,16 @@ def get_layout():
                                 "value": "export_gif",
                             },
                             {
+                                "label": "Export webp (smaller than gif, slow)",
+                                "title": (
+                                    "Export the timelapse as a single (large) webp file. "
+                                    "Should end up smaller than the equivalent gif. "
+                                    "Requires the system WebP library to support animated WebP."
+                                ),
+                                "value": "export_webp",
+                                "disabled": not features.check("webp_anim"),
+                            },
+                            {
                                 "label": "Export frames",
                                 "title": (
                                     "Export the individual frames of the timelapse in png format. "
@@ -806,8 +883,15 @@ def get_layout():
                                 ),
                                 "value": "export_frames",
                             },
+                            {
+                                "label": "1:1 aspect ratio",
+                                "title": (
+                                    "Use a 1:1 instead of 16:9 aspect ratio for the galaxy if checked."
+                                ),
+                                "value": "square_aspect_ratio",
+                            },
                         ],
-                        value=["export_gif", "export_frames"],
+                        value=["export_gif"],
                         labelStyle=dict(color=TEXT_COLOR),
                         style={"text-align": "center"},
                     ),
