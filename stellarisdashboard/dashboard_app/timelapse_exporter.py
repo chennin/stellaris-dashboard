@@ -64,14 +64,7 @@ class TimelapseExporter:
         frames = []
         colors = {GalaxyMapData.UNCLAIMED: (1, 1, 1)}
         for i, day in enumerate(tqdm.tqdm(export_days)):
-            galaxy = self.galaxy_map_data.get_graph_for_date(day)
-            for node in galaxy.nodes:
-                if galaxy.nodes[node]["country"] not in colors:
-                    colors[ galaxy.nodes[node]["country"] ] = self.rgb(galaxy.nodes[node]["country"])
-            for e in galaxy.edges:
-                if galaxy.edges[e]["country"] not in colors:
-                    colors[ galaxy.edges[e]["country"] ] = self.rgb(galaxy.edges[e]["country"])
-            frame = self.draw_frame(day, x_range, y_range, colors, galaxy)
+            frame = self.draw_frame(day, x_range, y_range, colors)
             if export_gif or export_webp:
                 frames.append(frame)
             if export_frames:
@@ -139,10 +132,15 @@ class TimelapseExporter:
         x_range: Optional[Tuple[float, float]],
         y_range: Optional[Tuple[float, float]],
         colors: Dict,
-        galaxy: nx.Graph,
     ) -> Image:
         self.galaxy_map_data.update_graph_for_date(day)
         nx_galaxy = self.galaxy_map_data.galaxy_graph
+        for node in nx_galaxy.nodes:
+            if nx_galaxy.nodes[node]["country"] not in colors:
+                colors[ nx_galaxy.nodes[node]["country"] ] = self.rgb(nx_galaxy.nodes[node]["country"])
+        for e in nx_galaxy.edges:
+            if nx_galaxy.edges[e]["country"] not in colors:
+                colors[ nx_galaxy.edges[e]["country"] ] = self.rgb(nx_galaxy.edges[e]["country"])
 
         fig = plt.figure(figsize=(self.width, self.height))
         ax = fig.add_subplot(111)
@@ -155,7 +153,7 @@ class TimelapseExporter:
             ax=ax,
             pos={node: nx_galaxy.nodes[node]["pos"] for node in nx_galaxy.nodes},
             node_color=[
-                colors[ galaxy.nodes[node]["country"] ] for node in nx_galaxy.nodes
+                colors[ nx_galaxy.nodes[node]["country"] ] for node in nx_galaxy.nodes
             ],
             edge_color=[
                 colors[ nx_galaxy.edges[e]["country"] ] for e in nx_galaxy.edges
@@ -167,7 +165,7 @@ class TimelapseExporter:
         )
         fig.set_facecolor("k")
 
-        self._draw_systems(ax, colors, galaxy)
+        self._draw_systems(ax, colors)
 
         ax.text(
             0.05,
@@ -228,7 +226,7 @@ class TimelapseExporter:
                     position,
                     country,
                     color=avg_pos["color"],
-                    size="x-small",
+                    size="medium",
                     ha="center",
                     path_effects=[path_effects.withStroke(linewidth=3, foreground="w")]
                 )
